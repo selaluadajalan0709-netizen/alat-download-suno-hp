@@ -141,6 +141,7 @@
           <div class="row" style="margin-top:6px">
             <button type="button" class="b-yellow" id="copyBmBtn">📋 COPY KODE BOOKMARKLET</button>
           </div>
+          <p style="margin:8px 0 0;color:#b71c1c"><b>Penting:</b> kode di atas dipasang di BOOKMARK browser — <b>jangan ditempel di kolom token</b>. Yang ditempel di kolom token cuma hasil tokennya (mulai dengan "eyJ").</p>
           <div style="margin-top:8px">
             <b>Cara pakainya tiap mau ambil token:</b> buka tab <b>suno.com</b> → ketuk kolom alamat (URL bar) → ketik <b>Ambil Token Suno</b> → <b>klik saran bookmark berikon bintang</b> (jangan tekan Enter). Token otomatis ter-copy, balik ke sini lalu ketuk <b>PASTE &amp; LOGIN</b>!
           </div>
@@ -350,6 +351,14 @@ async function prepareSong(id, tk){
 async function applyToken(){
   const v = $('tokenInput').value.trim().replace(/^Bearer\s+/i,'');
   if (!v){ showStatus($('tokenStatus'), 'Isi token dulu.', true); return; }
+  if (/^javascript:/i.test(v)){
+    showStatus($('tokenStatus'), 'Itu KODE BOOKMARKLET, bukan token — jangan ditempel di sini. Kode itu dipasang sebagai BOOKMARK di browser (panduan 📱 Di HP di atas), lalu dijalankan pas kamu lagi di tab suno.com. Yang ditempel di sini cuma token hasilnya, yang mulai dengan "eyJ".', true);
+    return;
+  }
+  if (!/^eyJ/.test(v)){
+    showStatus($('tokenStatus'), 'Kayaknya ini bukan token Suno — token asli mulai dengan "eyJ" dan panjang banget. Ambil tokennya pakai panduan di atas ya.', true);
+    return;
+  }
   token = v; sessionStorage.setItem('sd_token', v);
   showStatus($('tokenStatus'), 'Mengecek token ke Suno…');
   try {
