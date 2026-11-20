@@ -7,6 +7,19 @@ export default async function handler(req, res) {
     const token = body.token;
     if (!token) { res.status(400).json({ error: 'Set token dulu di bagian Kantong Token.' }); return; }
 
+    // Decode the JWT payload (no signature check) so an expired token says so
+    // instead of a mysterious 401.
+    try {
+      const payload = JSON.parse(Buffer.from(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+      if (payload.exp) {
+        const fmt = ts => new Date(ts * 1000).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+        if (Date.now() / 1000 > payload.exp) {
+          res.status(401).json({ error: `Token ini SUDAH KEDALUWARSA — masa berlakunya habis ${fmt(payload.exp)} WIB, sekarang ${fmt(Date.now() / 1000)} WIB. Ambil token baru, lalu SEGERA paste & login (jangan ditunda).` });
+          return;
+        }
+      }
+    } catch (_) { /* not a JWT shape; let Suno judge it */ }
+
     const out = [{ id: 'all', type: 'all', name: 'Semua Lagu — seluruh akun', count: null }];
     const seen = new Set(['all']);
     let anyOk = false; let firstError = null;
@@ -24,7 +37,11 @@ export default async function handler(req, res) {
         try {
           const r = await fetch(src.buildUrl(p), { headers });
           if (!r.ok) {
-            if (!firstError) firstError = `Suno menolak token ini (${r.status}). Ambil token baru dari suno.com.`;
+            if (!firstError) {
+              const reason = r.headers.get('x-clerk-auth-reason');
+              const snippet = (await r.text().catch(() => '')).slice(0, 160);
+              firstError = `Suno menolak token ini (${r.status}${reason ? ', alasan Clerk: ' + reason : ''}). ${snippet}`;
+            }
             break;
           }
           anyOk = true;
