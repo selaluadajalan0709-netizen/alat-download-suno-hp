@@ -189,7 +189,22 @@
       <div id="byIdResult"></div>
     </div>
 
-    <footer>Audio di-decrypt jadi file <b>.m4a</b> (format asli Suno, bukan mp3). Token kamu cuma dipakai dari browser kamu buat manggil Suno — nggak disimpan di server.</footer>
+    <div class="card">
+      <div class="card-head">
+        <h2>04 — Mesin Convert MP3</h2>
+      </div>
+      <p style="margin:0 0 10px;font-size:14px">Menu terpisah buat mengubah <b>.m4a → .mp3</b> (192 kbps), dikerjain SETELAH download selesai. Lagu yang baru kamu download di sesi ini otomatis muncul di daftar bawah — atau ambil file .m4a apa pun dari HP/PC kamu. Convert jalan di perangkat kamu sendiri, bukan di server.</p>
+      <div class="row">
+        <label class="b-ghost" for="convFiles" style="cursor:pointer">📂 PILIH FILE .M4A</label>
+        <input type="file" id="convFiles" accept=".m4a,.mp4,audio/*" multiple style="display:none">
+        <button class="b-red" id="convAllBtn">CONVERT SEMUA</button>
+      </div>
+      <div id="convList" style="margin-top:6px">
+        <p id="convEmpty" style="color:#5b7d90;margin:8px 0 0;font-size:13px">Belum ada file. Download lagu dulu di menu 02 / 03, atau pilih file .m4a dari perangkat.</p>
+      </div>
+    </div>
+
+    <footer>Audio di-decrypt jadi file <b>.m4a</b> (format asli Suno, bukan mp3) — convert ke MP3 ada di menu 04. Token kamu cuma dipakai dari browser kamu buat manggil Suno — nggak disimpan di server.</footer>
   </div>
 </div>
 
@@ -365,7 +380,8 @@ async function loadFfmpeg(){
   ffmpegState = { ff, fetchFile: util.fetchFile };
   return ffmpegState;
 }
-const mp3Cache = {}; // song id -> hasil convert {blob, filename, url}
+const convRows = new Map(); // uid -> {label, p, mp3, btn, st}
+let convUid = 0;
 async function convertToMp3(p, onProgress){
   const { ff, fetchFile } = await loadFfmpeg();
   const stamp = Math.random().toString(36).slice(2);
@@ -385,38 +401,64 @@ async function convertToMp3(p, onProgress){
   const filename = p.filename.replace(/\.m4a$/i, '') + '.mp3';
   return { blob, filename, url: URL.createObjectURL(blob) };
 }
-function makeMp3Button(p, stEl, songId){
+// ---------- MENU CONVERT MP3 (terpisah dari download) ----------
+// Baris convert ditambah dari dua sumber: (1) lagu yang selesai didownload
+// di sesi ini (noteSessionDownload), (2) file .m4a pilihan pemakai.
+function addConvRow(label, p){
+  for (const r of convRows.values()) if (r.p.filename === p.filename) return;
+  const row = { label, p, mp3: null, btn: null, st: null };
+  convRows.set(++convUid, row);
+  const empty = $('convEmpty'); if (empty) empty.style.display = 'none';
+  const d = document.createElement('div');
+  d.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed #bfe3f2';
+  const info = document.createElement('div');
+  info.style.cssText = 'flex:1;min-width:0;font-size:13px;word-break:break-all';
+  const nameEl = document.createElement('b');
+  nameEl.textContent = label;
+  const st = document.createElement('span');
+  st.className = 'st';
+  st.textContent = ` · ${(p.blob.size/1048576).toFixed(1)} MB · .m4a`;
+  info.appendChild(nameEl);
+  info.appendChild(st);
   const b = document.createElement('button');
-  b.className = 'b-ghost mp3btn';
-  b.textContent = '🎵 MP3';
-  b.title = 'Ubah ke MP3 192 kbps lalu simpan (convert di HP/PC kamu sendiri)';
-  b.onclick = async () => {
-    if (songId && mp3Cache[songId]){
-      if (await savePrepared(mp3Cache[songId])) b.textContent = 'MP3 ✓';
-      return;
-    }
-    b.disabled = true;
-    const old = b.textContent;
-    b.textContent = 'mesin…';
-    if (stEl){ stEl.textContent = 'menyiapkan mesin convert (pertama kali ±30 MB, sekali aja)…'; stEl.className = 'st'; }
-    try {
-      const mp3 = await convertToMp3(p, pct => { b.textContent = 'MP3 ' + pct + '%'; });
-      if (songId) mp3Cache[songId] = mp3;
-      if (stEl){ stEl.textContent = `MP3 siap · ${(mp3.blob.size/1048576).toFixed(1)} MB`; stEl.className = 'st'; }
-      if (await savePrepared(mp3)){
-        b.textContent = 'MP3 ✓';
-        if (stEl) stEl.textContent = 'MP3 tersimpan ✓';
-      } else {
-        b.textContent = old;
-      }
-    } catch(e){
-      b.textContent = old;
-      if (stEl){ stEl.textContent = 'convert gagal: ' + e.message; stEl.className = 'st err'; }
-    }
-    b.disabled = false;
-  };
-  return b;
+  b.className = 'b-dl';
+  b.textContent = 'CONVERT → MP3';
+  b.onclick = () => convertConvRow(row);
+  d.appendChild(info);
+  d.appendChild(b);
+  $('convList').appendChild(d);
+  row.btn = b; row.st = st;
 }
+async function convertConvRow(row){
+  const b = row.btn, st = row.st;
+  if (row.mp3){
+    if (await savePrepared(row.mp3)){ b.textContent = 'MP3 ✓'; st.textContent = 'MP3 tersimpan ✓'; }
+    return;
+  }
+  b.disabled = true;
+  b.textContent = 'mesin…';
+  st.textContent = 'menyiapkan mesin convert (pertama kali ±30 MB, sekali aja)…';
+  try {
+    row.mp3 = await convertToMp3(row.p, pct => { b.textContent = 'CONVERT ' + pct + '%'; });
+    st.textContent = `MP3 siap · ${(row.mp3.blob.size/1048576).toFixed(1)} MB`;
+    if (await savePrepared(row.mp3)){ b.textContent = 'MP3 ✓'; st.textContent = 'MP3 tersimpan ✓'; }
+    else b.textContent = 'SIMPAN MP3';
+  } catch(e){
+    b.textContent = 'CONVERT → MP3';
+    st.textContent = 'convert gagal: ' + e.message;
+  }
+  b.disabled = false;
+}
+function noteSessionDownload(label, p){ try { addConvRow(label, p); } catch(e){} }
+$('convFiles').onchange = e => {
+  for (const f of e.target.files) addConvRow(f.name, { blob: f, filename: f.name, url: '' });
+  e.target.value = '';
+};
+$('convAllBtn').onclick = async () => {
+  $('convAllBtn').disabled = true;
+  for (const row of convRows.values()) if (!row.mp3) await convertConvRow(row);
+  $('convAllBtn').disabled = false;
+};
 
 // ---------- TOKEN ----------
 async function applyToken(){
@@ -557,18 +599,13 @@ function renderSongs(){
       if (stEl){ stEl.textContent = 'decrypting…'; stEl.className = 'st'; }
       try {
         const p = await prepareSong(s.id, token);
+        noteSessionDownload(s.title, p);
         triggerAnchorDownload(p);
         dlBtn.disabled = false;
         dlBtn.textContent = '✓';
         dlBtn.className = 'b-dl done';
         dlBtn.title = 'Klik lagi untuk simpan ulang';
         if (stEl){ stEl.textContent = `${(p.blob.size/1048576).toFixed(1)} MB · tersimpan`; stEl.className = 'st'; }
-        const actBox = dlBtn.parentElement;
-        if (actBox && !actBox.querySelector('.mp3btn')){
-          const mb = makeMp3Button(p, stEl, s.id);
-          mb.style.marginLeft = '6px';
-          actBox.appendChild(mb);
-        }
       } catch(e){
         dlBtn.disabled = false;
         dlBtn.textContent = 'DL';
@@ -753,6 +790,7 @@ $('dlAllBtn').onclick = async () => {
     try {
       const p = await prepareSong(s.id, token);
       ready++;
+      noteSessionDownload(s.title, p);
       triggerAnchorDownload(p);
       if (stEl){ stEl.textContent = `siap · ${(p.blob.size/1048576).toFixed(1)} MB`; stEl.className = 'st'; }
       const act = $('act-' + s.id);
@@ -769,9 +807,6 @@ $('dlAllBtn').onclick = async () => {
           }
         };
         act.appendChild(b);
-        const mb = makeMp3Button(p, stEl, s.id);
-        mb.style.marginLeft = '6px';
-        act.appendChild(mb);
       }
       await new Promise(r => setTimeout(r, 400));
     } catch(e){
@@ -779,7 +814,7 @@ $('dlAllBtn').onclick = async () => {
     }
   }
   $('barFill').style.width = '100%';
-  $('barText').textContent = stopFlag ? 'berhenti' : `selesai — ${ready}/${chosen.length} siap (ketuk SIMPAN buat .m4a, atau tombol MP3 buat convert ke .mp3)`;
+  $('barText').textContent = stopFlag ? 'berhenti' : `selesai — ${ready}/${chosen.length} siap (ketuk SIMPAN buat simpan .m4a — convert ke MP3 ada di menu 04 Mesin Convert di bawah)`;
   $('dlAllBtn').disabled = false;
   isBatchRunning = false;
 };
@@ -799,6 +834,7 @@ $('byIdBtn').onclick = async () => {
   showStatus($('byIdStatus'), 'Decrypting ' + id.slice(0,8) + '…');
   try {
     const p = await prepareSong(id, token);
+    noteSessionDownload(p.filename, p);
     hideStatus($('byIdStatus'));
     const box = $('byIdResult'); box.innerHTML = '';
     const info = document.createElement('p');
@@ -816,10 +852,6 @@ $('byIdBtn').onclick = async () => {
     t.textContent = 'BUKA DI TAB BARU';
     t.onclick = () => window.open(p.url, '_blank');
     box.appendChild(t);
-    const mb = makeMp3Button(p, null, id);
-    mb.style.marginLeft = '8px';
-    mb.textContent = '🎵 UBAH KE MP3 & SIMPAN';
-    box.appendChild(mb);
     triggerAnchorDownload(p);
   } catch(e){
     showStatus($('byIdStatus'), e.message, true);
