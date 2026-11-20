@@ -362,47 +362,55 @@ async function prepareSong(id, tk){
   return p;
 }
 
-// ---------- CONVERT KE MP3 (di browser, mesin ffmpeg.wasm) ----------
-// Berjalan lokal di perangkat pemakai — server tidak ikut campur. Mesinnya
-// (±30 MB) diunduh sekali dari CDN saat tombol MP3 pertama diklik, setelah
-// itu tersimpan di cache browser.
-let ffmpegState = null;
-async function loadFfmpeg(){
-  if (ffmpegState) return ffmpegState;
-  if (!window.FFmpeg){
+// ---------- CONVERT KE MP3 (Web Audio + lamejs) ----------
+// Berjalan lokal di perangkat pemakai — server tidak ikut campur. Tanpa
+// wasm, tanpa worker, tanpa SharedArrayBuffer: audio dibaca pakai decoder
+// bawaan browser (Web Audio), lalu di-encode ke MP3 pakai lamejs (±150 KB,
+// diunduh sekali dari CDN saat convert pertama, setelah itu ke-cache).
+let lameReady = false;
+async function loadLame(){
+  if (lameReady) return;
+  if (!window.lamejs){
     await new Promise((res, rej) => {
       const sc = document.createElement('script');
-      sc.src = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.0/dist/ffmpeg.min.js';
+      sc.src = 'https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js';
       sc.onload = res;
       sc.onerror = () => rej(new Error('gagal memuat mesin convert dari CDN — cek koneksi internet'));
       document.head.appendChild(sc);
     });
   }
-  const ffmpeg = window.FFmpeg.createFFmpeg({
-    log: false,
-    corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
-  });
-  await ffmpeg.load();
-  ffmpegState = { ffmpeg, fetchFile: window.FFmpeg.fetchFile };
-  return ffmpegState;
+  lameReady = true;
 }
 const convRows = new Map(); // uid -> {label, p, mp3, btn, st}
 let convUid = 0;
 async function convertToMp3(p, onProgress){
-  const { ffmpeg, fetchFile } = await loadFfmpeg();
-  const stamp = Math.random().toString(36).slice(2);
-  const inName = 'in_' + stamp + '.m4a';
-  const outName = 'out_' + stamp + '.mp3';
-  ffmpeg.FS('writeFile', inName, await fetchFile(p.blob));
-  if (onProgress) ffmpeg.setProgress(({ ratio }) => onProgress(Math.min(99, Math.round(ratio * 100))));
+  await loadLame();
+  const ab = await p.blob.arrayBuffer();
+  let audio;
   try {
-    await ffmpeg.run('-i', inName, '-vn', '-codec:a', 'libmp3lame', '-b:a', '192k', outName);
-  } finally {
-    try { ffmpeg.setProgress(() => {}); } catch(e){}
+    const AC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const ctx = new AC(2, 1, 48000);
+    audio = await ctx.decodeAudioData(ab);
+  } catch(e){
+    throw new Error('browser tidak bisa membaca format audio ini (' + (e.message || e) + ')');
   }
-  const data = ffmpeg.FS('readFile', outName);
-  try { ffmpeg.FS('unlink', inName); ffmpeg.FS('unlink', outName); } catch(e){}
-  const blob = new Blob([data.buffer], { type: 'audio/mpeg' });
+  const enc = new window.lamejs.Mp3Encoder(audio.numberOfChannels, audio.sampleRate, 192);
+  const L = audio.getChannelData(0);
+  const R = audio.numberOfChannels > 1 ? audio.getChannelData(1) : L;
+  const parts = [];
+  const chunk = 1152 * 40;
+  const f2i = f => { const s = new Int16Array(f.length); for (let i = 0; i < f.length; i++){ const v = Math.max(-1, Math.min(1, f[i])); s[i] = v < 0 ? v * 0x8000 : v * 0x7FFF; } return s; };
+  for (let i = 0; i < L.length; i += chunk){
+    const d = audio.numberOfChannels > 1
+      ? enc.encodeBuffer(f2i(L.subarray(i, i + chunk)), f2i(R.subarray(i, i + chunk)))
+      : enc.encodeBuffer(f2i(L.subarray(i, i + chunk)));
+    if (d.length) parts.push(new Uint8Array(d));
+    if (onProgress) onProgress(Math.min(99, Math.round(i / L.length * 100)));
+    await new Promise(r => setTimeout(r, 0));
+  }
+  const end = enc.flush();
+  if (end.length) parts.push(new Uint8Array(end));
+  const blob = new Blob(parts, { type: 'audio/mpeg' });
   const filename = p.filename.replace(/\.m4a$/i, '') + '.mp3';
   return { blob, filename, url: URL.createObjectURL(blob) };
 }
@@ -442,7 +450,7 @@ async function convertConvRow(row){
   }
   b.disabled = true;
   b.textContent = 'mesin…';
-  st.textContent = 'menyiapkan mesin convert (pertama kali ±30 MB, sekali aja)…';
+  st.textContent = 'menyiapkan mesin convert…';
   try {
     row.mp3 = await convertToMp3(row.p, pct => { b.textContent = 'CONVERT ' + pct + '%'; });
     st.textContent = `MP3 siap · ${(row.mp3.blob.size/1048576).toFixed(1)} MB`;
