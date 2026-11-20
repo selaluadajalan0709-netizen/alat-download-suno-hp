@@ -204,7 +204,7 @@
 <script>
 const GATE_PASSWORD = '121212Sofy';
 const PAGE_SIZE = 20;
-const BOOKMARKLET_CODE = "javascript:(async()=>{try{const t=await window.Clerk.session.getToken();if(!t)return alert('Login Suno dulu!');try{await navigator.clipboard.writeText(t);alert('Token Suno berhasil di-copy! Balik ke web lalu ketuk PASTE & LOGIN.');}catch(e){prompt('Copy token Suno ini:',t);}}catch(e){alert('Gagal ambil token. Pastikan lagi buka suno.com dan sudah login.');}})();";
+const BOOKMARKLET_CODE = "javascript:(async()=>{let t=null;const expOf=x=>{try{return JSON.parse(atob(x.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).exp||0;}catch(e){return 0;}};const fresh=x=>!!x&&expOf(x)*1000>Date.now();try{for(let i=0;i<25&&!(window.Clerk&&window.Clerk.session);i++)await new Promise(r=>setTimeout(r,200));if(window.Clerk&&window.Clerk.session)t=await window.Clerk.session.getToken();}catch(e){}if(!fresh(t)){t=null;try{const m=document.cookie.match(/(?:^|; )__session=([^;]+)/);if(m){const c=decodeURIComponent(m[1]);if(fresh(c))t=c;}}catch(e){}}if(!t){alert('Token segar tidak ditemukan - sesi Suno di browser ini sepertinya sudah lama mati. Login ULANG di suno.com sampai kelihatan lagu-lagumu, lalu jalankan bookmarklet ini lagi.');return;}try{await navigator.clipboard.writeText(t);alert('Token Suno berhasil di-copy! Balik ke web lalu ketuk PASTE & LOGIN.');}catch(e){prompt('Copy token Suno ini:',t);}})();";
 
 const $ = id => document.getElementById(id);
 
