@@ -369,35 +369,40 @@ async function prepareSong(id, tk){
 let ffmpegState = null;
 async function loadFfmpeg(){
   if (ffmpegState) return ffmpegState;
-  const { FFmpeg } = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/+esm');
-  const util = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.2/+esm');
-  const ff = new FFmpeg();
-  const base = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm';
-  await ff.load({
-    coreURL: await util.toBlobURL(base + '/ffmpeg-core.js', 'text/javascript'),
-    wasmURL: await util.toBlobURL(base + '/ffmpeg-core.wasm', 'application/wasm'),
+  if (!window.FFmpeg){
+    await new Promise((res, rej) => {
+      const sc = document.createElement('script');
+      sc.src = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.0/dist/ffmpeg.min.js';
+      sc.onload = res;
+      sc.onerror = () => rej(new Error('gagal memuat mesin convert dari CDN — cek koneksi internet'));
+      document.head.appendChild(sc);
+    });
+  }
+  const ffmpeg = window.FFmpeg.createFFmpeg({
+    log: false,
+    corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
   });
-  ffmpegState = { ff, fetchFile: util.fetchFile };
+  await ffmpeg.load();
+  ffmpegState = { ffmpeg, fetchFile: window.FFmpeg.fetchFile };
   return ffmpegState;
 }
 const convRows = new Map(); // uid -> {label, p, mp3, btn, st}
 let convUid = 0;
 async function convertToMp3(p, onProgress){
-  const { ff, fetchFile } = await loadFfmpeg();
+  const { ffmpeg, fetchFile } = await loadFfmpeg();
   const stamp = Math.random().toString(36).slice(2);
   const inName = 'in_' + stamp + '.m4a';
   const outName = 'out_' + stamp + '.mp3';
-  await ff.writeFile(inName, await fetchFile(p.blob));
-  const progHandler = ({ progress }) => { if (onProgress) onProgress(Math.min(99, Math.round(progress * 100))); };
-  ff.on('progress', progHandler);
+  ffmpeg.FS('writeFile', inName, await fetchFile(p.blob));
+  if (onProgress) ffmpeg.setProgress(({ ratio }) => onProgress(Math.min(99, Math.round(ratio * 100))));
   try {
-    await ff.exec(['-i', inName, '-vn', '-codec:a', 'libmp3lame', '-b:a', '192k', outName]);
+    await ffmpeg.run('-i', inName, '-vn', '-codec:a', 'libmp3lame', '-b:a', '192k', outName);
   } finally {
-    try { ff.off('progress', progHandler); } catch(e){}
+    try { ffmpeg.setProgress(() => {}); } catch(e){}
   }
-  const data = await ff.readFile(outName);
-  try { await ff.deleteFile(inName); await ff.deleteFile(outName); } catch(e){}
-  const blob = new Blob([data], { type: 'audio/mpeg' });
+  const data = ffmpeg.FS('readFile', outName);
+  try { ffmpeg.FS('unlink', inName); ffmpeg.FS('unlink', outName); } catch(e){}
+  const blob = new Blob([data.buffer], { type: 'audio/mpeg' });
   const filename = p.filename.replace(/\.m4a$/i, '') + '.mp3';
   return { blob, filename, url: URL.createObjectURL(blob) };
 }
